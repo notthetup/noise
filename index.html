@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Noise 🔊</title>
+</head>
+<style>
+  .control {
+    border: 11.2px solid #ffb160;
+    border-radius: 50%;
+    margin: 20px;
+    padding: 28px;
+    width: 112px;
+    height: 112px;
+    font-size: 0;
+    white-space: nowrap;
+    text-align: center;
+    cursor: pointer;
+  }
+  .control,
+  .control .left,
+  .control .right,
+  .control:before {
+    display: inline-block;
+    vertical-align: middle;
+    transition: border 0.4s, width 0.4s, height 0.4s, margin 0.4s;
+    transition-timing-function: cubic-bezier(1, 0, 0, 1);
+  }
+  .control:before {
+    content: "";
+    height: 112px;
+  }
+  .control.pause .left,
+  .control.pause .right {
+    margin: 0;
+    border-left: 36.96px solid #ffb160;
+    border-top: 0 solid transparent;
+    border-bottom: 0 solid transparent;
+    height: 96.992px;
+  }
+  .control.pause .left {
+    border-right: 22.4px solid transparent;
+  }
+  .control.play .left {
+    margin-left: 18.66666667px;
+    border-left: 48.496px solid #ffb160;
+    border-top: 28px solid transparent;
+    border-bottom: 28px solid transparent;
+    border-right: 0px solid transparent;
+    height: 56px;
+  }
+  .control.play .right {
+    margin: 0;
+    border-left: 48.496px solid #ffb160;
+    border-top: 28px solid transparent;
+    border-bottom: 28px solid transparent;
+    height: 0px;
+  }
+  .control:hover {
+    border-color: #ff982d;
+  }
+  .control:hover .left,
+  .control:hover .right {
+    border-left-color: #ff982d;
+  }
+  .center{
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    width: 100vw;
+  }
+</style>
+<script>
+  smoothfade = function (context, gainNode, _globalOptions) {
+   var _globalOptions = _globalOptions || {};
+
+    if (!gainNode || !context) {
+      throw new Error('gainNode and context arguments cannot be null');
+    }
+
+    _globalOptions.startValue = _globalOptions.hasOwnProperty('startValue') ? _globalOptions.startValue : gainNode.gain.value;
+    _globalOptions.type = _globalOptions.hasOwnProperty('type') ? _globalOptions.type : 'exponential';
+    _globalOptions.fadeLength = _globalOptions.hasOwnProperty('fadeLength') ? _globalOptions.fadeLength : 10;
+
+    var ALMOST_ZERO = 0.00001;
+
+    var _currentStartValue = 0;
+    var _currentTargetValue = _globalOptions.startValue;
+    var _currentStartTime = 0;
+    var _currentEndTime = context.currentTime;
+    var _currDirection = '';
+    var _debug = !!_globalOptions.debug;
+
+    function isFading(time) {
+      return _currentEndTime > time;
+    }
+
+    function cauculateInterpolationAt(time) {
+      if (_debug) {
+        console.log('calculating interpolation');
+      }
+      if (time <= _currentStartTime) {
+        return _currentStartValue;
+      } else if (time >= _currentEndTime) {
+        return _currentTargetValue;
+      } else {
+        if (_globalOptions.type === 'linear') {
+          return _currentStartValue + (_currentTargetValue - _currentStartValue) * ((time - _currentStartTime) / (_currentEndTime - _currentStartTime));
+        } else if (_globalOptions.type === 'exponential') {
+          var exponent = ((time - _currentStartTime) / (_currentEndTime - _currentStartTime));
+          var startVal = _currentStartValue || ALMOST_ZERO
+          return _currentStartValue * Math.pow((_currentTargetValue / _currentStartValue), exponent);
+        }
+      }
+    }
+
+    function calculateEndTime(startTime, targetValue) {
+      if (!isFading()) {
+        return startTime + _globalOptions.fadeLength;
+      } else if (targetValue === _currentStartValue) {
+        var timeTillNow = (context.currentTime - _currentStartTime);
+        if (_debug) {
+          console.log('end time will be now +', timeTillNow);
+        }
+        return startTime + timeTillNow;
+      } else {
+        var startValue = cauculateInterpolationAt(startTime);
+        var timeTaken = 0;
+        if (_globalOptions.type === 'linear') {
+          var gradient = _globalOptions.fadeLength / (ALMOST_ZERO - 1);
+          timeTaken = ((targetValue - startValue) * gradient);
+          if (_debug) {
+            console.log('Time taken to go linearly from ', startValue, '-', targetValue, ' is ', timeTaken);
+          }
+
+        } else if (_globalOptions.type === 'exponential') {
+          var diff = Math.log(targetValue) - Math.log(startValue);
+          timeTaken = (10 / Math.log(ALMOST_ZERO) * diff);
+          if (_debug) {
+            console.log('Time taken to go expoentially from ', startValue, '-', targetValue, ' is ', timeTaken);
+          }
+        }
+        return startTime + timeTaken;
+      }
+    }
+
+    return {
+      valueAt: function (time) {
+        if (!time) {
+          time = context.currentTime;
+        }
+
+        if (!isFading(time)) {
+          return _currentTargetValue;
+        } else {
+          return cauculateInterpolationAt(time);
+        }
+      },
+
+      fadeIn: function (_options) {
+        if (_currDirection === 'fadein') {
+          return;
+        }
+
+        _options = _options || {};
+        _options.startTime = _options.hasOwnProperty('startTime') ? _options.startTime : context.currentTime;
+        _options.targetValue = _options.hasOwnProperty('targetValue') ? _options.targetValue : 1;
+
+        if (!_options.hasOwnProperty('endTime')) {
+          _options.endTime = calculateEndTime(_options.startTime, _options.targetValue);
+        }
+
+        var startvalue = cauculateInterpolationAt(_options.startTime);
+        if (_debug) {
+          console.log('Start value', startvalue);
+        }
+        gainNode.gain.cancelScheduledValues(_options.startTime);
+        gainNode.gain.setValueAtTime(startvalue, _options.startTime);
+
+        if (_globalOptions.type === 'linear') {
+          gainNode.gain.linearRampToValueAtTime(_options.targetValue, _options.endTime);
+        } else if (_globalOptions.type === 'exponential') {
+          gainNode.gain.exponentialRampToValueAtTime(_options.targetValue, _options.endTime);
+        }
+
+        _currentStartValue = startvalue;
+        _currentTargetValue = _options.targetValue;
+        _currentStartTime = _options.startTime;
+        _currentEndTime = _options.endTime;
+        _currDirection = 'fadein';
+
+      },
+
+      fadeOut: function (_options) {
+        if (_currDirection === 'fadeout') {
+          return;
+        }
+
+        _options = _options || {};
+        _options.startTime = _options.hasOwnProperty('startTime') ? _options.startTime : context.currentTime;
+        _options.targetValue = _options.hasOwnProperty('targetValue') ? _options.targetValue : ALMOST_ZERO;
+
+        if (!_options.hasOwnProperty('endTime')) {
+          _options.endTime = calculateEndTime(_options.startTime, _options.targetValue);
+        }
+
+        var startvalue = cauculateInterpolationAt(_options.startTime);
+        if (_debug) {
+          console.log('Start value', startvalue);
+        }
+        gainNode.gain.cancelScheduledValues(_options.startTime);
+        gainNode.gain.setValueAtTime(startvalue, _options.startTime);
+
+        if (_globalOptions.type === 'linear') {
+          gainNode.gain.linearRampToValueAtTime(_options.targetValue, _options.endTime);
+        } else if (_globalOptions.type === 'exponential') {
+          gainNode.gain.exponentialRampToValueAtTime(_options.targetValue, _options.endTime);
+        }
+
+        if (_debug) {
+          console.log(context.currentTime, ':: Fading out to ', _options.targetValue, 'starting from', _options.startTime, 'to', _options.endTime);
+        }
+
+        _currentStartValue = startvalue;
+        _currentTargetValue = _options.targetValue;
+        _currentStartTime = _options.startTime;
+        _currentEndTime = _options.endTime;
+        _currDirection = 'fadeout';
+
+      }
+    };
+  };
+</script>
+
+<script>
+
+  const playStr = "Play ▶"
+  const pauseStr = "Pause ⏸️"
+  const noiseLength = 10;
+
+  window.addEventListener('load', () => {
+    console.log("loaded");
+    var btn = document.getElementsByClassName('control')[0];
+    if (!btn) return;
+    window.AudioContext = window.AudioContext || window.webkitAudioContext;
+    var sm;
+    var webAudioSetup = false;
+
+    btn.addEventListener('click', () => {
+      btn.classList.toggle('play');
+      btn.classList.toggle('pause');
+
+      if (btn.classList.contains('play')) {
+        if (sm) sm.fadeOut();
+      } else {
+        if (!webAudioSetup) {
+          sm = setUpWebAudio();
+        }
+        if (sm) sm.fadeIn();
+      }
+    });
+  });
+
+  function setUpWebAudio(params) {
+    console.log("Setting up WebAudio");
+    var context = new AudioContext();
+    var bufSource = context.createBufferSource();
+    var gain = context.createGain();
+
+    // This gives us the actual ArrayBuffer that contains the data
+    var noiseBuf = context.createBuffer(1, context.sampleRate * noiseLength, context.sampleRate);
+    var bufData = noiseBuf.getChannelData(0);
+    for (var i = 0; i < context.sampleRate * noiseLength; i++) {
+      bufData[i] = Math.random() * 2 - 1;
+    }
+    bufSource.buffer = noiseBuf;
+    bufSource.loop = true;
+
+    bufSource.connect(gain);
+    gain.connect(context.destination);
+
+    var sm = smoothfade(context, gain, {
+      'startValue': 0.00001,
+      'fadeLength': 4,
+      'type': 'exponential',
+      'debug': true
+    });
+
+    bufSource.start();
+    bufSourceRunning = true;
+
+    return sm;
+  }
+
+</script>
+
+<body>
+  <div class="center">
+    <div class="control play">
+      <span class="left"></span><span class="right"></span>
+    </div>
+  </div>
+
+</body>
+
+</html>
